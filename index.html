@@ -145,9 +145,36 @@ select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,va
 }
 @media(max-width:420px){.two{grid-template-columns:1fr}.big{font-size:26px}}
 </style>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+body.locked .app,body.locked .tabbar{display:none!important}
+.au{position:fixed;inset:0;z-index:200;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));overflow:auto}
+.au[hidden]{display:none}
+.au-box{width:100%;max-width:380px;background:var(--card);border:1px solid var(--bd);border-radius:18px;padding:26px 22px}
+.au-box .logo{padding:0 0 14px;text-align:center}
+.au-box h1{font-size:22px;text-align:center;margin-bottom:4px}
+.au-box p.mu{text-align:center;margin-bottom:16px}
+.au-box label{display:block;font-size:12px;color:var(--mu);margin:12px 0 5px}
+.au-box input{width:100%;min-height:46px;padding:0 14px;border-radius:12px;border:1px solid var(--bd);background:var(--bg2);color:var(--tx);font:inherit;font-size:16px}
+.au-box input:focus{outline:2px solid var(--ac);outline-offset:1px}
+.au-pw{position:relative}.au-pw input{padding-right:64px}
+.au-pw button{position:absolute;right:6px;top:5px;height:36px;padding:0 10px;color:var(--mu);font-size:12px}
+.au-go{width:100%;min-height:46px;margin-top:18px;border-radius:12px;background:var(--ac);color:#04130a;font-weight:600}
+.au-go:disabled{opacity:.6;cursor:wait}
+.au-link{display:block;margin:14px auto 0;color:var(--mu);font-size:13px;text-decoration:underline}
+.au-msg{min-height:20px;margin-top:12px;font-size:13px;text-align:center}
+.au-msg.err{color:var(--bad)}.au-msg.ok{color:var(--ac)}
+.au-spin{text-align:center;color:var(--mu)}
+</style>
 </head>
 <body>
 <noscript>ATHLETE OS needs JavaScript.</noscript>
+<div class="au" id="au" hidden></div>
 <div class="app">
   <aside class="side"><div class="logo">ATHLETE <b>OS</b></div><nav class="nav" id="sidenav"></nav></aside>
   <div>
@@ -1484,7 +1511,111 @@ function boot(){
   idbOpen().then(async ok=>{if(ok){await idbLoadAll();await migratePhotos();render()}});
   try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 }
-if(typeof document!=='undefined'&&!(typeof window!=='undefined'&&window.__TEST__))boot();
+/* ================= AUTH (Supabase) =================
+   Fill in the two values below. Use the Project URL WITHOUT /rest/v1 and the
+   PUBLISHABLE (anon) key only. Never put a secret or service_role key here. */
+const SUPABASE_URL='https://cofhzrwkskzfymmeiefs.supabase.co';            // e.g. https://abcdefgh.supabase.co
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_CBLYWKKmLYD5KSWoSKhqxA_gRTyHPAA'; // e.g. sb_publishable_... or the legacy anon key
+let sb=null,APP_STARTED=false,AUTH_MODE='in';
+const auEl=()=>$('#au');
+function auShow(html){document.body.classList.add('locked');const a=auEl();a.innerHTML=html;a.hidden=false}
+function auMsg(t,k){const m=$('#auMsg');if(m){m.textContent=t||'';m.className='au-msg '+(k||'')}}
+const AU_LOGO='<div class="logo">ATHLETE <b>OS</b></div>';
+function auLoading(t){auShow('<div class="au-box">'+AU_LOGO+'<p class="au-spin">'+(t||'Loading…')+'</p></div>')}
+function authErr(e){
+  const m=String(e&&e.message||e||'');
+  if(/invalid login|invalid credentials/i.test(m))return 'Incorrect email or password.';
+  if(/email not confirmed/i.test(m))return 'This email is not confirmed yet. Confirm it in Supabase, then try again.';
+  if(/rate limit|too many/i.test(m))return 'Too many attempts. Wait a minute and try again.';
+  if(/failed to fetch|network|load failed/i.test(m))return 'Cannot reach Supabase. Check your connection and the Project URL.';
+  return m||'Something went wrong.';
+}
+function pwField(id,ph,ac){return '<div class="au-pw"><input id="'+id+'" type="password" autocomplete="'+ac+'" placeholder="'+ph+'" required><button type="button" data-pw="'+id+'">Show</button></div>'}
+function showSignIn(note){
+  AUTH_MODE='in';
+  auShow('<form class="au-box" id="auForm" novalidate>'+AU_LOGO+'<h1>Sign in</h1><p class="mu sm">Private app. Accounts are created by the owner.</p>'+
+   '<label for="auEmail">Email</label><input id="auEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" required>'+
+   '<label for="auPw">Password</label>'+pwField('auPw','Your password','current-password')+
+   '<button class="au-go" id="auGo" type="submit">Sign in</button><button type="button" class="au-link" id="auForgot">Forgot password?</button>'+
+   '<div class="au-msg" id="auMsg" role="status"></div></form>');
+  if(note)auMsg(note,'err');
+}
+function showRecovery(){
+  AUTH_MODE='rec';
+  auShow('<form class="au-box" id="auForm" novalidate>'+AU_LOGO+'<h1>Set a new password</h1><p class="mu sm">At least 8 characters.</p>'+
+   '<label for="auPw">New password</label>'+pwField('auPw','New password','new-password')+
+   '<button class="au-go" id="auGo" type="submit">Save password</button><div class="au-msg" id="auMsg" role="status"></div></form>');
+}
+function showConfigError(){
+  auShow('<div class="au-box">'+AU_LOGO+'<h1>Setup needed</h1><p class="mu sm">Add your Supabase Project URL and publishable key to <b>SUPABASE_URL</b> and <b>SUPABASE_PUBLISHABLE_KEY</b> near the end of index.html, then redeploy.</p></div>');
+}
+function startApp(){
+  if(APP_STARTED)return;APP_STARTED=true;
+  boot();
+  const so=document.createElement('button');so.className='btn sm';so.id='signout';so.type='button';so.textContent='Sign out';
+  so.style.cssText='margin:auto 6px 4px';
+  $('.side').appendChild(so);
+  const mt=$('.mtop');if(mt){const b=so.cloneNode(true);b.id='signoutM';b.style.cssText='margin-left:8px';mt.appendChild(b)}
+}
+async function doSignOut(){try{await sb.auth.signOut()}catch(e){toast(authErr(e),'err')}}
+function onSession(session,event){
+  if(event==='PASSWORD_RECOVERY'){showRecovery();return}
+  if(AUTH_MODE==='rec')return;
+  if(session){auEl().hidden=true;document.body.classList.remove('locked');startApp()}
+  else{
+    const expired=APP_STARTED&&event!=='SIGNED_OUT';
+    if(APP_STARTED){location.reload();return} // clean reset of in-memory state after sign-out
+    showSignIn(expired?'Your session expired. Please sign in again.':'')
+  }
+}
+function initAuth(){
+  if(!SUPABASE_URL||!SUPABASE_PUBLISHABLE_KEY||!window.supabase){
+    if(!window.supabase&&SUPABASE_URL){auShow('<div class="au-box">'+AU_LOGO+'<h1>Cannot load sign-in</h1><p class="mu sm">The Supabase library failed to load. Check your connection and reload.</p></div>');return}
+    showConfigError();return;
+  }
+  try{sb=window.supabase.createClient(SUPABASE_URL.replace(/\/rest\/v1\/?$/,'').replace(/\/$/,''),SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}})}
+  catch(e){auShow('<div class="au-box">'+AU_LOGO+'<h1>Setup error</h1><p class="mu sm">'+authErr(e)+'</p></div>');return}
+  auLoading('Checking session…');
+  sb.auth.onAuthStateChange((event,session)=>{setTimeout(()=>onSession(session,event),0)});
+  sb.auth.getSession().then(({data,error})=>{
+    if(error)showSignIn(authErr(error));
+    else if(!data.session&&!APP_STARTED&&AUTH_MODE==='in'&&!location.hash.includes('type=recovery'))showSignIn();
+  }).catch(e=>showSignIn(authErr(e)));
+  document.addEventListener('click',e=>{
+    const pw=e.target.closest('[data-pw]');
+    if(pw){const i=document.getElementById(pw.dataset.pw);const h=i.type==='password';i.type=h?'text':'password';pw.textContent=h?'Hide':'Show';return}
+    if(e.target.closest('#auForgot')){forgot();return}
+    if(e.target.closest('#signout,#signoutM'))doSignOut();
+  });
+  document.addEventListener('submit',async e=>{
+    if(e.target.id!=='auForm')return;e.preventDefault();
+    const go=$('#auGo');go.disabled=true;auMsg('');
+    try{
+      if(AUTH_MODE==='rec'){
+        const pw=$('#auPw').value;if(pw.length<8)throw new Error('Password must be at least 8 characters.');
+        const {error}=await sb.auth.updateUser({password:pw});if(error)throw error;
+        history.replaceState(null,'',location.pathname);AUTH_MODE='in';auMsg('Password updated.','ok');
+        const {data}=await sb.auth.getSession();onSession(data.session,'SIGNED_IN');
+      }else{
+        const email=$('#auEmail').value.trim(),pw=$('#auPw').value;
+        if(!email||!pw)throw new Error('Enter your email and password.');
+        const {error}=await sb.auth.signInWithPassword({email,password:pw});if(error)throw error;
+        auMsg('Signed in…','ok');
+      }
+    }catch(err){auMsg(authErr(err),'err');go.disabled=false}
+  });
+}
+async function forgot(){
+  const email=($('#auEmail')||{}).value;
+  if(!email||!email.trim()){auMsg('Enter your email above first.','err');return}
+  auMsg('Sending…');
+  try{const {error}=await sb.auth.resetPasswordForEmail(email.trim(),{redirectTo:location.origin+location.pathname});if(error)throw error;auMsg('If that account exists, a reset link was sent.','ok')}
+  catch(err){auMsg(authErr(err),'err')}
+}
+if(typeof document!=='undefined'&&!(typeof window!=='undefined'&&window.__TEST__)){
+  if('serviceWorker' in navigator&&location.protocol==='https:')window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+  document.body.classList.add('locked');initAuth();
+}
 </script>
 </body>
 </html>
