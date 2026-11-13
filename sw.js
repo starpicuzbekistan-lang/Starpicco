@@ -1,7 +1,15 @@
 // STARPIC service worker: caches only the same-origin static app shell.
 // This does NOT support editing or authenticating offline.
 const CACHE_NAME = 'starpic-shell-v2-20261113';
-const ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/maskable-512.png'];
+
+const ASSETS = [
+  '/',
+  '/index.html',
+  '/manifest.webmanifest',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/maskable-512.png'
+];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS)).then(() => self.skipWaiting()));
 });
